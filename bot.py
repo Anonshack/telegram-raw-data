@@ -41,21 +41,36 @@ def save_stats(stats: dict):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=4, ensure_ascii=False)
 
-def register_user(user_id: int):
-    """Foydalanuvchini statistikaga qo'shadi."""
+async def register_user(user_id: int):
+    """Foydalanuvchini statistikaga qo'shadi va short_description ni yangilaydi."""
     stats = load_stats()
-    month_key = datetime.now().strftime("%Y-%m")  # masalan: "2026-04"
+    month_key = datetime.now().strftime("%Y-%m")
+
+    changed = False
 
     if user_id not in stats["all_user_ids"]:
         stats["all_user_ids"].append(user_id)
         stats["total_users"] = len(stats["all_user_ids"])
+        changed = True
 
     if month_key not in stats["monthly_users"]:
         stats["monthly_users"][month_key] = []
     if user_id not in stats["monthly_users"][month_key]:
         stats["monthly_users"][month_key].append(user_id)
+        changed = True
 
     save_stats(stats)
+
+    # Yangi user kelganda about qismini yangilaymiz
+    if changed:
+        monthly = len(stats["monthly_users"].get(month_key, []))
+        total   = len(stats["all_user_ids"])
+        try:
+            await bot.set_my_short_description(
+                short_description=f"{monthly:,} monthly users · {total:,} total"
+            )
+        except Exception:
+            pass
 
 def get_monthly_count() -> int:
     stats = load_stats()
@@ -206,7 +221,7 @@ def get_filter_keyboard() -> ReplyKeyboardMarkup:
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     user = message.from_user
-    register_user(user.id)
+    await register_user(user.id)
 
     raw_data = {
         "update_id": message.message_id,
@@ -274,7 +289,7 @@ async def copy_callback(callback: CallbackQuery):
 async def show_self_info(message: Message):
     u = message.from_user
     label = message.text
-    register_user(u.id)
+    await register_user(u.id)
 
     data = {
         "filter": label,
