@@ -67,7 +67,7 @@ async def register_user(user_id: int):
         total   = len(stats["all_user_ids"])
         try:
             await bot.set_my_short_description(
-                short_description=f"{monthly:,} monthly users · {total:,} total"
+                short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
             )
         except Exception:
             pass
@@ -414,9 +414,7 @@ async def set_commands():
     monthly = get_monthly_count()
     total   = get_total_count()
     await bot.set_my_short_description(
-        short_description=(
-            f"{monthly:,} monthly users"
-        )
+        short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
     )
     await bot.set_my_description(
         description=(
