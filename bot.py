@@ -339,8 +339,12 @@ async def show_filter_menu(message: Message):
 
 
 # ── /stats ────────────────────────────────────────────────────────────────────
+OWNER_ID = int(os.getenv("OWNER_ID", 0))
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
+    if message.from_user.id != OWNER_ID:
+        return  
+    
     monthly = get_monthly_count()
     total   = get_total_count()
     await message.answer(
@@ -489,12 +493,25 @@ async def on_chat_shared(message: Message):
 
 # ── Bot commands & descriptions ───────────────────────────────────────────────
 async def set_commands():
+    # Barcha userlar uchun
     await bot.set_my_commands([
         BotCommand(command="start",  description="Restart"),
         BotCommand(command="help",   description="How to use the bot"),
         BotCommand(command="filter", description="Show filter keyboard"),
-        BotCommand(command="stats",  description="Statistikani ko'rish"),
     ])
+
+    # Faqat egaga ko'rinadigan komandalar
+    if OWNER_ID:
+        from aiogram.types import BotCommandScopeChat
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start",  description="Restart"),
+                BotCommand(command="help",   description="How to use the bot"),
+                BotCommand(command="filter", description="Show filter keyboard"),
+                BotCommand(command="stats",  description="📊 Statistika"),
+            ],
+            scope=BotCommandScopeChat(chat_id=OWNER_ID),
+        )
 
     monthly = get_monthly_count()
     total   = get_total_count()
