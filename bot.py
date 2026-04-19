@@ -19,16 +19,18 @@ from aiogram.types import (
     UsersShared,
     SwitchInlineQueryChosenChat,
     BotCommand,
+    BotCommandScopeChat,
 )
 from dotenv import load_dotenv
 
 load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
+OWNER_ID  = int(os.getenv("OWNER_ID", 0))   # ← eng yuqorida, barcha joyda ko'rinadi
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp  = Dispatcher()
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 STATS_FILE = "stats.json"
@@ -58,7 +60,6 @@ def get_total_count() -> int:
 
 
 async def update_short_description():
-    """Short description ni hamma joydan chaqiriladigan yagona funksiya."""
     monthly = get_monthly_count()
     try:
         await bot.set_my_short_description(
@@ -69,23 +70,16 @@ async def update_short_description():
 
 
 async def register_user(user_id: int):
-    """
-    Foydalanuvchini statistikaga qo'shadi.
-    - Yangi total user bo'lsa -> all_user_ids ga qo'shiladi
-    - Yangi oylik user bo'lsa -> monthly_users ga qo'shiladi + short_description yangilanadi
-    """
-    stats = load_stats()
+    stats     = load_stats()
     month_key = datetime.now().strftime("%Y-%m")
 
     total_changed   = False
     monthly_changed = False
 
-    # Total hisob
     if user_id not in stats["all_user_ids"]:
         stats["all_user_ids"].append(user_id)
         total_changed = True
 
-    # Oylik hisob
     if month_key not in stats["monthly_users"]:
         stats["monthly_users"][month_key] = []
 
@@ -93,11 +87,9 @@ async def register_user(user_id: int):
         stats["monthly_users"][month_key].append(user_id)
         monthly_changed = True
 
-    # Faqat o'zgarish bo'lsa saqlash
     if total_changed or monthly_changed:
         save_stats(stats)
 
-    # Oylik o'zgarsa short_description yangilanadi
     if monthly_changed:
         await update_short_description()
 
@@ -284,11 +276,10 @@ async def cmd_start(message: Message):
     user = message.from_user
     await register_user(user.id)
 
-    raw_data = {
+    save_user(user.id, {
         "update_id": message.message_id,
         "message": message.model_dump(),
-    }
-    save_user(user.id, raw_data)
+    })
 
     await message.answer(
         "Hi Welcome To @gettelegram_rawdata_bot 🖐\n\n"
@@ -296,13 +287,11 @@ async def cmd_start(message: Message):
         "🔔 Bot News : @geodevcode",
         parse_mode="HTML",
     )
-
     await message.answer(
         f"Your ID : <code>{user.id}</code>",
         parse_mode="HTML",
         reply_markup=result_keyboard(user.id),
     )
-
     await message.answer(
         "🔍 <b>Filter turini tanlang:</b>",
         parse_mode="HTML",
@@ -328,23 +317,12 @@ async def cmd_help(message: Message):
     )
 
 
-# ── /filter ───────────────────────────────────────────────────────────────────
-@dp.message(Command("filter"))
-async def show_filter_menu(message: Message):
-    await message.answer(
-        "🔍 <b>Filter turini tanlang:</b>",
-        parse_mode="HTML",
-        reply_markup=get_filter_keyboard(),
-    )
-
-
-# ── /stats ────────────────────────────────────────────────────────────────────
-OWNER_ID = int(os.getenv("OWNER_ID", 0))
+# ── /stats — faqat egaga ──────────────────────────────────────────────────────
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
     if message.from_user.id != OWNER_ID:
-        return  
-    
+        return
+
     monthly = get_monthly_count()
     total   = get_total_count()
     await message.answer(
@@ -362,7 +340,7 @@ async def copy_callback(callback: CallbackQuery):
     await callback.answer(f"Copied: {val}", show_alert=True)
 
 
-# ── UsersShared handler — User / Premium / Bot tugmalari ─────────────────────
+# ── UsersShared handler ───────────────────────────────────────────────────────
 @dp.message(F.users_shared)
 async def on_users_shared(message: Message):
     shared: UsersShared = message.users_shared
@@ -408,30 +386,23 @@ async def on_users_shared(message: Message):
 # ── Forward handler ───────────────────────────────────────────────────────────
 @dp.message(F.forward_origin)
 async def on_forward(message: Message):
-    origin = message.forward_origin
+    origin      = message.forward_origin
     origin_type = type(origin).__name__
-
-    data = {"forward_type": origin_type, "raw": origin.model_dump()}
+    data        = {"forward_type": origin_type, "raw": origin.model_dump()}
 
     if hasattr(origin, "sender_user") and origin.sender_user:
         u = origin.sender_user
-        data["user_id"]   = u.id
-        data["username"]  = u.username
-        data["full_name"] = u.full_name
+        data.update({"user_id": u.id, "username": u.username, "full_name": u.full_name})
         entity_id = u.id
         label = f"👤 Forwarded User\n👤 <b>{u.full_name}</b>"
     elif hasattr(origin, "chat") and origin.chat:
         c = origin.chat
-        data["chat_id"]  = c.id
-        data["title"]    = c.title
-        data["username"] = c.username
+        data.update({"chat_id": c.id, "title": c.title, "username": c.username})
         entity_id = c.id
         label = f"📢 Forwarded Chat\n📌 <b>{c.title or '—'}</b>"
     elif hasattr(origin, "sender_chat") and origin.sender_chat:
         c = origin.sender_chat
-        data["chat_id"]  = c.id
-        data["title"]    = c.title
-        data["username"] = c.username
+        data.update({"chat_id": c.id, "title": c.title, "username": c.username})
         entity_id = c.id
         label = f"📢 Forwarded Chat\n📌 <b>{c.title or '—'}</b>"
     else:
@@ -455,7 +426,7 @@ async def on_forward(message: Message):
 # ── ChatShared handler ────────────────────────────────────────────────────────
 @dp.message(F.chat_shared)
 async def on_chat_shared(message: Message):
-    shared: ChatShared = message.chat_shared
+    shared   = message.chat_shared
     rid      = shared.request_id
     chat_id  = shared.chat_id
     title    = getattr(shared, "title",    None) or "—"
@@ -493,22 +464,19 @@ async def on_chat_shared(message: Message):
 
 # ── Bot commands & descriptions ───────────────────────────────────────────────
 async def set_commands():
-    # Barcha userlar uchun
+    # Barcha userlar uchun (stats yo'q)
     await bot.set_my_commands([
-        BotCommand(command="start",  description="Restart"),
-        BotCommand(command="help",   description="How to use the bot"),
-        BotCommand(command="filter", description="Show filter keyboard"),
+        BotCommand(command="start", description="Restart"),
+        BotCommand(command="help",  description="How to use the bot"),
     ])
 
-    # Faqat egaga ko'rinadigan komandalar
+    # Faqat egaga (stats bor)
     if OWNER_ID:
-        from aiogram.types import BotCommandScopeChat
         await bot.set_my_commands(
             [
-                BotCommand(command="start",  description="Restart"),
-                BotCommand(command="help",   description="How to use the bot"),
-                BotCommand(command="filter", description="Show filter keyboard"),
-                BotCommand(command="stats",  description="📊 Statistika"),
+                BotCommand(command="start", description="Restart"),
+                BotCommand(command="help",  description="How to use the bot"),
+                BotCommand(command="stats", description="📊 Statistika"),
             ],
             scope=BotCommandScopeChat(chat_id=OWNER_ID),
         )
@@ -526,12 +494,12 @@ async def set_commands():
     try:
         await bot.set_my_description(
             description=(
-                f"Hi! Welcome To @gettelegram_rawdata_bot 🖐\n"
-                f"The bot is free to use\n\n"
-                f"Get any Telegram ID instantly 🚀\n\n"
+                "Hi! Welcome To @gettelegram_rawdata_bot 🖐\n"
+                "The bot is free to use\n\n"
+                "Get any Telegram ID instantly 🚀\n\n"
                 f"👥 Monthly users : {monthly:,}\n"
                 f"📊 Total users   : {total:,}\n\n"
-                f"🔔 News : @geodevcode"
+                "🔔 News : @geodevcode"
             )
         )
     except Exception as e:
