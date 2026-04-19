@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# ── Monthly users counter ─────────────────────────────────────────────────────
+# ── Stats ─────────────────────────────────────────────────────────────────────
 STATS_FILE = "stats.json"
 
 
@@ -38,42 +38,12 @@ def load_stats() -> dict:
     if os.path.exists(STATS_FILE):
         with open(STATS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"total_users": 0, "monthly_users": {}, "all_user_ids": []}
+    return {"all_user_ids": [], "monthly_users": {}}
 
 
 def save_stats(stats: dict):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=4, ensure_ascii=False)
-
-
-async def register_user(user_id: int):
-    """Foydalanuvchini statistikaga qo'shadi va short_description ni yangilaydi."""
-    stats = load_stats()
-    month_key = datetime.now().strftime("%Y-%m")
-
-    changed = False
-
-    if user_id not in stats["all_user_ids"]:
-        stats["all_user_ids"].append(user_id)
-        stats["total_users"] = len(stats["all_user_ids"])
-        changed = True
-
-    if month_key not in stats["monthly_users"]:
-        stats["monthly_users"][month_key] = []
-    if user_id not in stats["monthly_users"][month_key]:
-        stats["monthly_users"][month_key].append(user_id)
-        changed = True
-
-    save_stats(stats)
-
-    if changed:
-        monthly = len(stats["monthly_users"].get(month_key, []))
-        try:
-            await bot.set_my_short_description(
-                short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
-            )
-        except Exception:
-            pass
 
 
 def get_monthly_count() -> int:
@@ -84,16 +54,59 @@ def get_monthly_count() -> int:
 
 def get_total_count() -> int:
     stats = load_stats()
-    return stats.get("total_users", 0)
+    return len(stats.get("all_user_ids", []))
+
+
+async def update_short_description():
+    """Short description ni hamma joydan chaqiriladigan yagona funksiya."""
+    monthly = get_monthly_count()
+    try:
+        await bot.set_my_short_description(
+            short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
+        )
+    except Exception as e:
+        logging.warning(f"set_my_short_description error: {e}")
+
+
+async def register_user(user_id: int):
+    """
+    Foydalanuvchini statistikaga qo'shadi.
+    - Yangi total user bo'lsa -> all_user_ids ga qo'shiladi
+    - Yangi oylik user bo'lsa -> monthly_users ga qo'shiladi + short_description yangilanadi
+    """
+    stats = load_stats()
+    month_key = datetime.now().strftime("%Y-%m")
+
+    total_changed   = False
+    monthly_changed = False
+
+    # Total hisob
+    if user_id not in stats["all_user_ids"]:
+        stats["all_user_ids"].append(user_id)
+        total_changed = True
+
+    # Oylik hisob
+    if month_key not in stats["monthly_users"]:
+        stats["monthly_users"][month_key] = []
+
+    if user_id not in stats["monthly_users"][month_key]:
+        stats["monthly_users"][month_key].append(user_id)
+        monthly_changed = True
+
+    # Faqat o'zgarish bo'lsa saqlash
+    if total_changed or monthly_changed:
+        save_stats(stats)
+
+    # Oylik o'zgarsa short_description yangilanadi
+    if monthly_changed:
+        await update_short_description()
 
 
 # ── Request IDs ───────────────────────────────────────────────────────────────
 REQ = {
-    # Foydalanuvchilar
     "user":       7,
     "premium":    8,
     "bot":        9,
-    # Guruhlar / kanallar
     "group":      1,
     "channel":    2,
     "forum":      3,
@@ -121,7 +134,12 @@ def to_json_str(data: dict) -> str:
 
 async def send_json(message: Message, data: dict):
     raw = to_json_str(data)
-    raw_escaped = raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    raw_escaped = (
+        raw
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     for i in range(0, len(raw_escaped), 3900):
         chunk = raw_escaped[i:i + 3900]
         await message.answer(
@@ -157,7 +175,6 @@ def get_filter_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                # 👤 User — oddiy foydalanuvchi tanlash
                 KeyboardButton(
                     text="👤 User",
                     request_users=KeyboardButtonRequestUsers(
@@ -168,7 +185,6 @@ def get_filter_keyboard() -> ReplyKeyboardMarkup:
                         request_photo=False,
                     ),
                 ),
-                # ⭐ Premium — faqat premium foydalanuvchilar
                 KeyboardButton(
                     text="⭐ Premium",
                     request_users=KeyboardButtonRequestUsers(
@@ -180,7 +196,6 @@ def get_filter_keyboard() -> ReplyKeyboardMarkup:
                         request_photo=False,
                     ),
                 ),
-                # 👾 Bot — faqat botlar
                 KeyboardButton(
                     text="👾 Bot",
                     request_users=KeyboardButtonRequestUsers(
@@ -323,6 +338,19 @@ async def show_filter_menu(message: Message):
     )
 
 
+# ── /stats ────────────────────────────────────────────────────────────────────
+@dp.message(Command("stats"))
+async def cmd_stats(message: Message):
+    monthly = get_monthly_count()
+    total   = get_total_count()
+    await message.answer(
+        f"📊 <b>Statistika</b>\n\n"
+        f"👥 Oylik foydalanuvchilar : <b>{monthly:,}</b>\n"
+        f"📈 Jami foydalanuvchilar  : <b>{total:,}</b>",
+        parse_mode="HTML",
+    )
+
+
 # ── Copy callback ─────────────────────────────────────────────────────────────
 @dp.callback_query(F.data.startswith("copy_"))
 async def copy_callback(callback: CallbackQuery):
@@ -373,7 +401,7 @@ async def on_users_shared(message: Message):
         )
 
 
-# ── Forward handler — forward qilingan xabardan ID olish ─────────────────────
+# ── Forward handler ───────────────────────────────────────────────────────────
 @dp.message(F.forward_origin)
 async def on_forward(message: Message):
     origin = message.forward_origin
@@ -424,9 +452,9 @@ async def on_forward(message: Message):
 @dp.message(F.chat_shared)
 async def on_chat_shared(message: Message):
     shared: ChatShared = message.chat_shared
-    rid     = shared.request_id
-    chat_id = shared.chat_id
-    title   = getattr(shared, "title",    None) or "—"
+    rid      = shared.request_id
+    chat_id  = shared.chat_id
+    title    = getattr(shared, "title",    None) or "—"
     username = getattr(shared, "username", None)
 
     labels = {
@@ -459,29 +487,38 @@ async def on_chat_shared(message: Message):
     )
 
 
-# ── Bot commands ──────────────────────────────────────────────────────────────
+# ── Bot commands & descriptions ───────────────────────────────────────────────
 async def set_commands():
     await bot.set_my_commands([
-        BotCommand(command="start", description="Restart"),
-        BotCommand(command="help",  description="How to use the bot"),
+        BotCommand(command="start",  description="Restart"),
+        BotCommand(command="help",   description="How to use the bot"),
         BotCommand(command="filter", description="Show filter keyboard"),
+        BotCommand(command="stats",  description="Statistikani ko'rish"),
     ])
 
     monthly = get_monthly_count()
     total   = get_total_count()
-    await bot.set_my_short_description(
-        short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
-    )
-    await bot.set_my_description(
-        description=(
-            f"Hi! Welcome To @gettelegram_rawdata_bot 🖐\n"
-            f"The bot is free to use\n\n"
-            f"Get any Telegram ID instantly 🚀\n\n"
-            f"👥 Monthly users : {monthly:,}\n"
-            f"📊 Total users   : {total:,}\n\n"
-            f"🔔 News : @geodevcode"
+
+    try:
+        await bot.set_my_short_description(
+            short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
         )
-    )
+    except Exception as e:
+        logging.warning(f"set_my_short_description error: {e}")
+
+    try:
+        await bot.set_my_description(
+            description=(
+                f"Hi! Welcome To @gettelegram_rawdata_bot 🖐\n"
+                f"The bot is free to use\n\n"
+                f"Get any Telegram ID instantly 🚀\n\n"
+                f"👥 Monthly users : {monthly:,}\n"
+                f"📊 Total users   : {total:,}\n\n"
+                f"🔔 News : @geodevcode"
+            )
+        )
+    except Exception as e:
+        logging.warning(f"set_my_description error: {e}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
