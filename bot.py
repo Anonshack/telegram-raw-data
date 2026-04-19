@@ -14,7 +14,9 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     KeyboardButtonRequestChat,
+    KeyboardButtonRequestUsers,
     ChatShared,
+    UsersShared,
     SwitchInlineQueryChosenChat,
     BotCommand,
 )
@@ -31,15 +33,18 @@ dp = Dispatcher()
 # ── Monthly users counter ─────────────────────────────────────────────────────
 STATS_FILE = "stats.json"
 
+
 def load_stats() -> dict:
     if os.path.exists(STATS_FILE):
         with open(STATS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"total_users": 0, "monthly_users": {}, "all_user_ids": []}
 
+
 def save_stats(stats: dict):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=4, ensure_ascii=False)
+
 
 async def register_user(user_id: int):
     """Foydalanuvchini statistikaga qo'shadi va short_description ni yangilaydi."""
@@ -61,10 +66,8 @@ async def register_user(user_id: int):
 
     save_stats(stats)
 
-    # Yangi user kelganda about qismini yangilaymiz
     if changed:
         monthly = len(stats["monthly_users"].get(month_key, []))
-        total   = len(stats["all_user_ids"])
         try:
             await bot.set_my_short_description(
                 short_description=f"{monthly:,} monthly users · Message data in JSON format (@geodev_at) 📩"
@@ -72,10 +75,12 @@ async def register_user(user_id: int):
         except Exception:
             pass
 
+
 def get_monthly_count() -> int:
     stats = load_stats()
     month_key = datetime.now().strftime("%Y-%m")
     return len(stats["monthly_users"].get(month_key, []))
+
 
 def get_total_count() -> int:
     stats = load_stats()
@@ -84,6 +89,11 @@ def get_total_count() -> int:
 
 # ── Request IDs ───────────────────────────────────────────────────────────────
 REQ = {
+    # Foydalanuvchilar
+    "user":       7,
+    "premium":    8,
+    "bot":        9,
+    # Guruhlar / kanallar
     "group":      1,
     "channel":    2,
     "forum":      3,
@@ -98,13 +108,16 @@ def _serial(obj):
         return obj.isoformat()
     raise TypeError(f"Type {type(obj)} not serializable")
 
+
 def save_user(user_id: int, data: dict):
     os.makedirs("users", exist_ok=True)
     with open(f"users/{user_id}.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False, default=_serial)
 
+
 def to_json_str(data: dict) -> str:
     return json.dumps(data, indent=4, ensure_ascii=False, default=_serial)
+
 
 async def send_json(message: Message, data: dict):
     raw = to_json_str(data)
@@ -115,6 +128,7 @@ async def send_json(message: Message, data: dict):
             f"<pre><code class='language-json'>{chunk}</code></pre>",
             parse_mode="HTML",
         )
+
 
 def result_keyboard(entity_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -138,13 +152,45 @@ def result_keyboard(entity_id: int) -> InlineKeyboardMarkup:
         ],
     ])
 
+
 def get_filter_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="👤 User"),
-                KeyboardButton(text="⭐ Premium"),
-                KeyboardButton(text="👾 Bot"),
+                # 👤 User — oddiy foydalanuvchi tanlash
+                KeyboardButton(
+                    text="👤 User",
+                    request_users=KeyboardButtonRequestUsers(
+                        request_id=REQ["user"],
+                        user_is_bot=False,
+                        request_name=True,
+                        request_username=True,
+                        request_photo=False,
+                    ),
+                ),
+                # ⭐ Premium — faqat premium foydalanuvchilar
+                KeyboardButton(
+                    text="⭐ Premium",
+                    request_users=KeyboardButtonRequestUsers(
+                        request_id=REQ["premium"],
+                        user_is_bot=False,
+                        user_is_premium=True,
+                        request_name=True,
+                        request_username=True,
+                        request_photo=False,
+                    ),
+                ),
+                # 👾 Bot — faqat botlar
+                KeyboardButton(
+                    text="👾 Bot",
+                    request_users=KeyboardButtonRequestUsers(
+                        request_id=REQ["bot"],
+                        user_is_bot=True,
+                        request_name=True,
+                        request_username=True,
+                        request_photo=False,
+                    ),
+                ),
             ],
             [
                 KeyboardButton(
@@ -229,7 +275,6 @@ async def cmd_start(message: Message):
     }
     save_user(user.id, raw_data)
 
-    # Welcome xabari
     await message.answer(
         "Hi Welcome To @gettelegram_rawdata_bot 🖐\n\n"
         "📚 Help : /help\n\n"
@@ -237,14 +282,12 @@ async def cmd_start(message: Message):
         parse_mode="HTML",
     )
 
-    # Userning o'z ID si
     await message.answer(
         f"Your ID : <code>{user.id}</code>",
         parse_mode="HTML",
         reply_markup=result_keyboard(user.id),
     )
 
-    # Filter keyboard
     await message.answer(
         "🔍 <b>Filter turini tanlang:</b>",
         parse_mode="HTML",
@@ -259,8 +302,11 @@ async def cmd_help(message: Message):
         "Hi Welcome To @gettelegram_rawdata_bot 🖐\n"
         "The bot is free to use\n\n"
         "This robot can help you get Telegram ID from the following :\n\n"
-        "▪️ Select the desired chat from the button section to send a numeric ID\n\n"
-        "▪️ Forward their message to the bot\n\n"
+        "▪️ <b>👤 User</b> — istalgan foydalanuvchini tanlang\n"
+        "▪️ <b>⭐ Premium</b> — faqat Premium foydalanuvchilarni tanlang\n"
+        "▪️ <b>👾 Bot</b> — botlarni tanlang\n"
+        "▪️ Guruh / Kanal / Forum tugmalaridan chat tanlang\n"
+        "▪️ Xabarni forward qiling — ID olish uchun\n\n"
         "🔔 News : @geodevcode",
         parse_mode="HTML",
         reply_markup=get_filter_keyboard(),
@@ -284,35 +330,47 @@ async def copy_callback(callback: CallbackQuery):
     await callback.answer(f"Copied: {val}", show_alert=True)
 
 
-# ── 👤 User / ⭐ Premium / 👾 Bot ─────────────────────────────────────────────
-@dp.message(F.text.in_({"👤 User", "⭐ Premium", "👾 Bot"}))
-async def show_self_info(message: Message):
-    u = message.from_user
-    label = message.text
-    await register_user(u.id)
+# ── UsersShared handler — User / Premium / Bot tugmalari ─────────────────────
+@dp.message(F.users_shared)
+async def on_users_shared(message: Message):
+    shared: UsersShared = message.users_shared
+    rid = shared.request_id
 
-    data = {
-        "filter": label,
-        "user_id": u.id,
-        "first_name": u.first_name,
-        "last_name": u.last_name,
-        "username": u.username,
-        "full_name": u.full_name,
-        "is_bot": u.is_bot,
-        "is_premium": bool(getattr(u, "is_premium", False)),
-        "language_code": u.language_code,
-        "raw": u.model_dump(),
+    label_map = {
+        REQ["user"]:    "👤 User",
+        REQ["premium"]: "⭐ Premium",
+        REQ["bot"]:     "👾 Bot",
     }
-    save_user(u.id, data)
+    label = label_map.get(rid, "👤 User")
 
-    await send_json(message, data)
-    await message.answer(
-        f"{label}\n"
-        f"👤 <b>{u.full_name}</b>\n"
-        f"◆ User ID : <code>{u.id}</code>",
-        parse_mode="HTML",
-        reply_markup=result_keyboard(u.id),
-    )
+    for user in shared.users:
+        user_id  = user.user_id
+        first    = getattr(user, "first_name", None) or "—"
+        last     = getattr(user, "last_name",  None) or ""
+        username = getattr(user, "username",   None)
+        full     = f"{first} {last}".strip()
+
+        data = {
+            "filter":     label,
+            "user_id":    user_id,
+            "first_name": first,
+            "last_name":  last,
+            "full_name":  full,
+            "username":   username,
+            "raw":        user.model_dump(),
+        }
+
+        save_user(user_id, data)
+        await send_json(message, data)
+
+        extra = f"\n🔗 @{username}" if username else ""
+        await message.answer(
+            f"{label}\n"
+            f"👤 <b>{full}</b>{extra}\n"
+            f"◆ User ID : <code>{user_id}</code>",
+            parse_mode="HTML",
+            reply_markup=result_keyboard(user_id),
+        )
 
 
 # ── Forward handler — forward qilingan xabardan ID olish ─────────────────────
@@ -323,30 +381,28 @@ async def on_forward(message: Message):
 
     data = {"forward_type": origin_type, "raw": origin.model_dump()}
 
-    # Har xil forward turlari
     if hasattr(origin, "sender_user") and origin.sender_user:
         u = origin.sender_user
-        data["user_id"] = u.id
-        data["username"] = u.username
+        data["user_id"]   = u.id
+        data["username"]  = u.username
         data["full_name"] = u.full_name
         entity_id = u.id
         label = f"👤 Forwarded User\n👤 <b>{u.full_name}</b>"
     elif hasattr(origin, "chat") and origin.chat:
         c = origin.chat
-        data["chat_id"] = c.id
-        data["title"] = c.title
+        data["chat_id"]  = c.id
+        data["title"]    = c.title
         data["username"] = c.username
         entity_id = c.id
         label = f"📢 Forwarded Chat\n📌 <b>{c.title or '—'}</b>"
     elif hasattr(origin, "sender_chat") and origin.sender_chat:
         c = origin.sender_chat
-        data["chat_id"] = c.id
-        data["title"] = c.title
+        data["chat_id"]  = c.id
+        data["title"]    = c.title
         data["username"] = c.username
         entity_id = c.id
         label = f"📢 Forwarded Chat\n📌 <b>{c.title or '—'}</b>"
     else:
-        # Hidden user
         sender_name = getattr(origin, "sender_user_name", "Hidden user")
         data["sender_name"] = sender_name
         entity_id = None
@@ -368,9 +424,9 @@ async def on_forward(message: Message):
 @dp.message(F.chat_shared)
 async def on_chat_shared(message: Message):
     shared: ChatShared = message.chat_shared
-    rid = shared.request_id
+    rid     = shared.request_id
     chat_id = shared.chat_id
-    title = getattr(shared, "title", None) or "—"
+    title   = getattr(shared, "title",    None) or "—"
     username = getattr(shared, "username", None)
 
     labels = {
@@ -384,11 +440,11 @@ async def on_chat_shared(message: Message):
     label = labels.get(rid, "Chat")
 
     data = {
-        "filter": label,
-        "chat_id": chat_id,
-        "title": title,
+        "filter":   label,
+        "chat_id":  chat_id,
+        "title":    title,
         "username": username,
-        "raw": shared.model_dump(),
+        "raw":      shared.model_dump(),
     }
 
     await send_json(message, data)
@@ -403,14 +459,14 @@ async def on_chat_shared(message: Message):
     )
 
 
-# ── Bot commands (menyu uchun) ────────────────────────────────────────────────
+# ── Bot commands ──────────────────────────────────────────────────────────────
 async def set_commands():
     await bot.set_my_commands([
         BotCommand(command="start", description="Restart"),
-        BotCommand(command="help",  description="How to use of bot"),
+        BotCommand(command="help",  description="How to use the bot"),
+        BotCommand(command="filter", description="Show filter keyboard"),
     ])
 
-    # Bot profil sahifasidagi qisqa tavsif
     monthly = get_monthly_count()
     total   = get_total_count()
     await bot.set_my_short_description(
