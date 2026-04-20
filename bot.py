@@ -140,12 +140,13 @@ async def send_json(message: Message, data: dict):
         )
 
 
+from aiogram.types import CopyTextButton
 def result_keyboard(entity_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=f"Copy {entity_id}",
-                callback_data=f"copy_{entity_id}",
+                text=f"📋 Copy {entity_id}",
+                copy_text=CopyTextButton(text=str(entity_id)),
             )
         ],
         [
@@ -334,6 +335,7 @@ async def cmd_stats(message: Message):
 
 
 # ── Copy callback ─────────────────────────────────────────────────────────────
+# Bu qatorlarni o'chiring:
 @dp.callback_query(F.data.startswith("copy_"))
 async def copy_callback(callback: CallbackQuery):
     val = callback.data.split("_", 1)[1]
